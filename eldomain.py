@@ -279,7 +279,7 @@ def filter_by_exclude_regexp_list(candidates, regexp_list, getter=lambda x: x):
     """
     for compiled in map(re.compile, regexp_list):
         test = compose(compiled.match, getter)
-        candidates = itertools.ifilterfalse(test, candidates)
+        candidates = itertools.filterfalse(test, candidates)
     return list(candidates)
 
 
@@ -401,7 +401,7 @@ class ELDomain(Domain):
     }
 
     def clear_doc(self, docname):
-        for fullname, (fn, _) in self.data['symbols'].items():
+        for fullname, (fn, _) in list(self.data['symbols'].items()):
             if fn == docname:
                 del self.data['symbols'][fullname]
 
@@ -423,7 +423,7 @@ class ELDomain(Domain):
                     if name == symbol:
                         return True
                 return False
-            return filter(filter_symbols, symbols.items())
+            return list(filter(filter_symbols, list(symbols.items())))
 
     def resolve_xref(self, env, fromdocname, builder,
                      typ, target, node, contnode):
@@ -440,7 +440,7 @@ class ELDomain(Domain):
                             contnode, name)
 
     def get_symbols(self):
-        for refname, (docname, type) in self.data['symbols'].iteritems():
+        for refname, (docname, type) in self.data['symbols'].items():
             yield (refname, refname, type, docname, refname, 1)
 
 
@@ -532,7 +532,7 @@ def load_packages(app):
     emacs = app.config.emacs_executable
     # `app.confdir` will be ignored if `elisp_pre_load` is an absolute path
     pre_load = path.join(app.confdir, app.config.elisp_pre_load)
-    for (name, prefix) in app.config.elisp_packages.iteritems():
+    for (name, prefix) in app.config.elisp_packages.items():
         index_package(emacs, name, prefix, pre_load)
 
 
