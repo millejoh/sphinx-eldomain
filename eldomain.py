@@ -1,3 +1,4 @@
+
 # eldomain is a Emacs Lisp domain for the Sphinx documentation tool.
 # Copyright (C) 2012 Takafumi Arakaki
 
@@ -53,7 +54,6 @@ from sphinx.util.docfields import Field, GroupedField
 DATA = {}
 DATA_DOC_STRINGS = {}
 DATA_ARGS = {}
-DATA_VALUES = {}
 
 
 def bool_option(arg):
@@ -75,29 +75,6 @@ def string_list(delimiter):
     return lambda argument: [v.strip() for v in argument.split(delimiter)]
 
 
-def quote_value_if_necessary(value):
-    """
-    Prepend single quote to `value` if it requires quote.
-
-    :type value: str
-    :arg  value: string representation of value
-
-    >>> quote_value_if_necessary('(a b c)')
-    \"'(a b c)\"
-    >>> quote_value_if_necessary('1')
-    '1'
-    >>> quote_value_if_necessary('\"string\"')
-    '\"string\"'
-    >>> quote_value_if_necessary('nil')
-    'nil'
-
-    """
-    if value in ("", "nil") or value[0].isdigit() or value.startswith('"'):
-        return value
-    else:
-        return "'" + value
-
-
 class ELSExp(ObjectDescription):
 
     doc_field_types = [
@@ -110,10 +87,6 @@ class ELSExp(ObjectDescription):
 
     option_spec = {
         'nodoc': bool_option, 'noindex': bool_option,
-        'args': string_list(','),
-        'value': lambda x: x,
-        # `value` is an alias of `args`.  Functions must use `args`
-        # and values must use `value`.
     }
 
     def handle_signature(self, sig, signode):
@@ -145,16 +118,7 @@ class ELSExp(ObjectDescription):
 
         objtype = self.get_signature_prefix(sig)
         signode.append(addnodes.desc_annotation(objtype, objtype))
-
-        lisp_args = self.options.get('args', [])
-        if not lisp_args:
-            v = self.options.get('value')
-            lisp_args = [v] if v else []
-        if not lisp_args:
-            lisp_args = DATA_ARGS.get(package, {}).get(sig, [])
-        if not lisp_args:
-            v = DATA_VALUES.get(package, {}).get(sig)
-            lisp_args = [quote_value_if_necessary(v)] if v else []
+        lisp_args = DATA_ARGS.get(package, {}).get(sig, [])
 
         if lisp_args:
             function_name = addnodes.desc_name(sig, sig + " ")
@@ -207,8 +171,6 @@ class ELSExp(ObjectDescription):
             string = DATA_DOC_STRINGS.get(package, {}) \
                                      .get(self.names[0][1], "")
             lines = string2lines(string)
-            if lines and lines[-1].startswith('(fn '):
-                lines = lines[:-1]
             self.state.nested_parse(StringList(lines), 0, node)
             if (result[1][1].children and
                 isinstance(result[1][1][0], nodes.field_list)):
@@ -329,8 +291,6 @@ class ELKeyMap(Directive):
         if mapdoc:
             nd = nodes.paragraph()
             lines = string2lines(doc_to_rst(mapdoc))
-            if lines and lines[-1].startswith('(fn '):
-                lines = lines[:-1]
             self.state.nested_parse(StringList(lines), 0, nd)
             nodelist.append(nd)
 
@@ -351,8 +311,6 @@ class ELKeyMap(Directive):
             if keybind['doc']:
                 nd = addnodes.desc_content()
                 lines = string2lines(doc_to_rst(keybind['doc']))
-                if lines and lines[-1].startswith('(fn '):
-                    lines = lines[:-1]
                 self.state.nested_parse(StringList(lines), 0, nd)
                 desc += nodes.definition("", nd)
             nodelist.append(desc)
@@ -401,7 +359,7 @@ class ELDomain(Domain):
     }
 
     def clear_doc(self, docname):
-        for fullname, (fn, _) in list(self.data['symbols'].items()):
+        for fullname, (fn, _) in self.data['symbols'].items():
             if fn == docname:
                 del self.data['symbols'][fullname]
 
@@ -423,7 +381,7 @@ class ELDomain(Domain):
                     if name == symbol:
                         return True
                 return False
-            return list(filter(filter_symbols, list(symbols.items())))
+            return [f for f in filter(filter_symbols, symbols.items())]
 
     def resolve_xref(self, env, fromdocname, builder,
                      typ, target, node, contnode):
@@ -445,52 +403,9 @@ class ELDomain(Domain):
 
 
 def doc_to_rst(docstring):
-    r"""
-    Convert Emacs Lisp style docstring to ReST.
-
-    >>> doc_to_rst("quoted `function' name")
-    'quoted :el:symbol:`function` name'
-
-    >>> doc_to_rst("it is `eval'ed")
-    'it is :el:symbol:`eval`\\ ed'
-
-    >>> doc_to_rst("`one'/`two'/`three'")
-    '\\ :el:symbol:`one`\\ /\\ :el:symbol:`two`\\ /\\ :el:symbol:`three`\\ '
-
-    >>> doc_to_rst("info node `(cl) Argument Lists'.")  # doctest: +ELLIPSIS
-    'info node `(cl) Argument Lists <http://.../cl/Argument-Lists.html>`__.'
-
-    """
-    docstring = _eldoc_quote_re.sub(_eldoc_quote_replacer, docstring)
-    docstring = _eldoc_info_node_re.sub(_eldoc_info_node_replacer, docstring)
+    docstring = _eldoc_quote_re.sub(r":el:symbol:`\1`", docstring)
     return docstring
-_eldoc_quote_re = re.compile(r"(\s)?`(\S+?)'(\s)?")
-_eldoc_info_node_re = re.compile(
-    r"((?:info|Info) (?:node|anchor)) `(?:\(([^\)]+?)\)\s+)?(\S[^']+?\S)'")
-"""
-Match syntax for hyperlink to Info documentation.
-
-See: (info "(elisp) Documentation Tips")
-"""
-
-
-def _eldoc_quote_replacer(match):
-    """Helper function for `doc_to_rst`."""
-    body = r":el:symbol:`{0}`".format(match.group(2))
-    left = match.group(1)
-    right = match.group(3)
-    return (left or r'\ ') + body + (right or r'\ ')
-
-
-def _eldoc_info_node_replacer(match):
-    """Helper function for `doc_to_rst`."""
-    prefix = match.group(1)
-    filename = match.group(2)
-    nodename = match.group(3)
-    text = '({0}) {1}'.format(filename, nodename) if filename else nodename
-    url = 'http://www.gnu.org/software/emacs/manual/html_node/{0}/{1}.html' \
-          .format(filename or 'emacs', nodename.replace(' ', '-'))
-    return '{0} `{1} <{2}>`__'.format(prefix, text, url)
+_eldoc_quote_re = re.compile(r"`(\S+)'")
 
 
 def index_package(emacs, package, prefix, pre_load, extra_args=[]):
@@ -509,7 +424,7 @@ def index_package(emacs, package, prefix, pre_load, extra_args=[]):
             "Error while executing '{0}'.\n\n"
             "STDOUT:\n{1}\n\nSTDERR:\n{2}\n".format(
                 ' '.join(command), stdout, stderr))
-    DATA[package] = lisp_data = json.loads(stdout)
+    DATA[package] = lisp_data = json.loads(stdout.decode())
     DATA_DOC_STRINGS[package] = {}
 
     # FIXME: support using same name for function/variable/face
@@ -520,12 +435,9 @@ def index_package(emacs, package, prefix, pre_load, extra_args=[]):
                 DATA_DOC_STRINGS[package][data['name']] = doc_to_rst(doc)
 
     DATA_ARGS[package] = {}
+
     for data in lisp_data['function']:
         DATA_ARGS[package][data['name']] = data['arg']
-
-    DATA_VALUES[package] = {}
-    for data in lisp_data['variable']:
-        DATA_VALUES[package][data['name']] = data['value']
 
 
 def load_packages(app):
@@ -537,12 +449,10 @@ def load_packages(app):
 
 
 def setup(app):
-    default_emacs = os.getenv("EMACS")
-    # `compile` command may set EMACS=t, so avoid using that value.
-    if not default_emacs or default_emacs == 't':
-        default_emacs = 'emacs'
     app.add_domain(ELDomain)
-    app.add_config_value('emacs_executable', default_emacs, 'env')
+    app.add_config_value('emacs_executable',
+                         os.getenv("EMACS") or 'emacs',
+                         'env')
     app.add_config_value('elisp_pre_load', 'conf.el', 'env')
     app.add_config_value('elisp_packages', {}, 'env')
     app.connect('builder-inited', load_packages)
